@@ -1,0 +1,45 @@
+[
+  {
+    "protocol_family":       "ipv4",
+    "transport_protocol":    "tcp",
+    "src_ip":                "192.168.1.100",
+    "dst_ip":                "192.168.1.1",
+    "src_port":              45678,
+    "dst_port":              80,
+    "tcp_seq":               1000,
+    "tcp_ack_seq":           0,
+    "tcp_flags":             2,
+    "payload":               "Hello TCP!",
+    "packet_count":          3
+  },
+  {
+    "protocol_family":       "ipv4",
+    "transport_protocol":    "udp",
+    "src_ip":                "192.168.1.100",
+    "dst_ip":                "192.168.1.1",
+    "src_port":              53123,
+    "dst_port":              2000,
+    "payload":               "Hello UDP!",
+    "packet_count":          5
+  },
+  {
+    "protocol_family":       "ipv6",
+    "transport_protocol":    "icmp",
+    "src_ip":                "2001:db8::1",
+    "dst_ip":                "2001:db8::2",
+    "icmp_type":             128,
+    "icmp_code":             0,
+    "payload":               "Ping IPv6!",
+    "packet_count":          2
+  },
+  {
+    "protocol_family":       "ipv6",
+    "transport_protocol":    "icmp",
+    "src_ip":                "2001:db8::2",
+    "dst_ip":                "2001:db8::1",
+    "icmp_type":             129,
+    "icmp_code":             0,
+    "payload":               "Ping IPv6!",
+    "packet_count":          2
+  }
+]
