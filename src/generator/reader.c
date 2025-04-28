@@ -8,9 +8,7 @@
 #include "../../include/generator/proto_icmp.h"
 
 void load_templates_from_json(const char *filename,
-                              packet_list_t *list,
-                              int use_threads,
-                              int num_threads) {
+                              packet_list_t *list) {
     json_error_t error;
     json_t *root = json_load_file(filename, 0, &error);
     if (!root) {
@@ -26,7 +24,6 @@ void load_templates_from_json(const char *filename,
     size_t idx;
     json_t *obj;
     json_array_foreach(root, idx, obj) {
-        // Campos genéricos
         const char *family_s = json_string_value(json_object_get(obj, "protocol_family"));
         const char *trans_s  = json_string_value(json_object_get(obj, "transport_protocol"));
         const char *src_ip   = json_string_value(json_object_get(obj, "src_ip"));
@@ -94,7 +91,6 @@ void load_templates_from_json(const char *filename,
                         break;
                 }
             } else {
-                // IPv6 análogo (use IP_V6 constantes e funções)
                 switch (proto) {
                     case IPPROTO_TCP:
                         pkt = create_tcp_packet(

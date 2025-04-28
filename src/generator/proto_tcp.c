@@ -36,12 +36,11 @@ packet_t* create_tcp_packet(
         struct ip_header_v4 *ip_header = (struct ip_header_v4*) packet->data;
         struct tcp_header *tcp_header = (struct tcp_header*) (packet->data + ip_header_size);
 
-        /* Preencher cabeçalho IP */
-        ip_header->version_ihl = (4 << 4) | 5; // IPv4, IHL=5 (20 bytes)
+        ip_header->version_ihl = (4 << 4) | 5;
         ip_header->tos = 0;
         ip_header->total_length = htons(packet->length);
         ip_header->identification = htons(rand() & 0xFFFF);
-        ip_header->flags_fragment = htons(0x4000); // Don't fragment
+        ip_header->flags_fragment = htons(0x4000);
         ip_header->ttl = 64;
         ip_header->protocol = IP_PROTO_TCP;
         ip_header->source_addr = inet_addr(src_ip);
@@ -121,7 +120,6 @@ packet_t* create_tcp_packet(
         memset(pseudo.zeros, 0, 3);
         pseudo.next_header = IP_PROTO_TCP;
 
-        /* Temporário para cálculo do checksum */
         size_t tcp_total_size = sizeof(struct pseudo_header_v6) + tcp_header_size + payload_size;
         uint8_t *tcp_checksum_buff = (uint8_t*) malloc(tcp_total_size);
         memcpy(tcp_checksum_buff, &pseudo, sizeof(struct pseudo_header_v6));

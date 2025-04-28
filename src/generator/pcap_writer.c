@@ -8,13 +8,11 @@ pcap_dumper_t* open_pcap_file(const char *filename, int snaplen, int network) {
     pcap_t *pcap;
     pcap_dumper_t *dumper;
 
-    // Create a dummy pcap_t for the dumper
     pcap = pcap_open_dead(network, snaplen);
     if (pcap == NULL) {
         return NULL;
     }
 
-    // Open the dump file
     dumper = pcap_dump_open(pcap, filename);
     if (dumper == NULL) {
         pcap_close(pcap);
@@ -31,14 +29,11 @@ int write_packet_to_pcap(pcap_dumper_t *dumper, packet_t *packet) {
         return -1;
     }
 
-    // Set current time
     gettimeofday(&header.ts, NULL);
 
-    // Set packet length
     header.caplen = packet->length;
     header.len = packet->length;
 
-    // Write the packet
     pcap_dump((u_char *)dumper, &header, packet->data);
 
     return 0;

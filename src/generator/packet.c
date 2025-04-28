@@ -1,6 +1,3 @@
-//
-// Created by rnborges on 28/04/25.
-//
 
 #include "../../include/generator/packet.h"
 #include <stdlib.h>
@@ -11,9 +8,6 @@
 static const uint8_t DEFAULT_DST_MAC[6] = { 0xAA,0xBB,0xCC,0xDD,0xEE,0xFF };
 static const uint8_t DEFAULT_SRC_MAC[6] = { 0x11,0x22,0x33,0x44,0x55,0x66 };
 
-/**
- * Prepend a fixed Ethernet header to packet->data.
- */
 void add_ethernet_header(packet_t *packet) {
     if (!packet || !packet->data) return;
 
@@ -31,10 +25,8 @@ void add_ethernet_header(packet_t *packet) {
     );
     memcpy(new + 12, &ethertype, 2);
 
-    // Copia o payload IP/L4 original
     memcpy(new + ETHERNET_HEADER_SIZE, old, oldlen);
 
-    // Substitui buffer
     free(old);
     packet->data   = new;
     packet->length = oldlen + ETHERNET_HEADER_SIZE;
