@@ -1,8 +1,5 @@
-//
-// Created by rnborges on 05/05/25.
-//
 
-#include "../../include/injector/txrx.h"
+#include "../include/injector/txrx.h"
 #include <pcap.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -17,63 +14,54 @@ typedef struct {
     const char    *iface_recv;
     uint32_t       timeout_ms;
 
-    uint32_t       total_pkts;
-    uint32_t      *send_times_ms;  // timestamp (ms) de cada envio
-    int            *recv_flags;    // 0 = não recebido, 1 = recebido
+    uint32_t      total_pkts;
+    uint32_t     *send_times_ms;
+    int          *recv_flags;
 
     pthread_mutex_t lock;
     pthread_cond_t  cond_all_recv;
-    int             rx_done;
 } txrx_ctx_t;
 
-// utilitário para obter timestamp em milissegundos
+// obtém timestamp em ms
 static uint32_t now_ms() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (uint32_t)((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
+    return (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
 }
 
-// TX thread: envia todos os pacotes e preenche send_times_ms
+// thread de envio
 static void *thread_tx(void *arg) {
-    txrx_ctx_t *ctx = (txrx_ctx_t*)arg;
+    txrx_ctx_t *ctx = arg;
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *pcap = pcap_open_live(ctx->iface_send, BUFSIZ, 0, 1, errbuf);
-    if (!pcap) {
-        fprintf(stderr, "TX: não foi possível abrir interface '%s': %s\n",
-                ctx->iface_send, errbuf);
+    pcap_t *pc = pcap_open_live(ctx->iface_send, BUFSIZ, 0, 1, errbuf);
+    if (!pc) {
+        fprintf(stderr, "TX: não abriu '%s': %s\n", ctx->iface_send, errbuf);
         return NULL;
     }
 
     packet_t *pkt = ctx->list->head;
-    uint32_t idx = 0;
-    while (pkt) {
+    for (uint32_t idx = 0; pkt; pkt = pkt->next, idx++) {
         uint32_t t0 = now_ms();
-        if (pcap_sendpacket(pcap, pkt->data, pkt->length) != 0) {
-            fprintf(stderr, "TX[%u]: falha ao enviar: %s\n",
-                    idx, pcap_geterr(pcap));
+        if (pcap_sendpacket(pc, pkt->data, pkt->length) != 0) {
+            fprintf(stderr, "TX[%u]: falha: %s\n", idx, pcap_geterr(pc));
         }
         pthread_mutex_lock(&ctx->lock);
         ctx->send_times_ms[idx] = t0;
         pthread_mutex_unlock(&ctx->lock);
-
-        pkt = pkt->next;
-        idx++;
-        usleep(1000);  // ajuste: intervalo entre envios, se desejar
+        usleep(1000);  // pequenas pausas para não atropelar a interface
     }
 
-    pcap_close(pcap);
+    pcap_close(pc);
     return NULL;
 }
 
-// RX thread: captura pacotes, extrai ID do payload e marca recv_flags[id-1]
-// quando todos recebidos ou timeout ocorre, sinaliza condição
+// thread de captura e correlação
 static void *thread_rx(void *arg) {
-    txrx_ctx_t *ctx = (txrx_ctx_t*)arg;
+    txrx_ctx_t *ctx = arg;
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *pcap = pcap_open_live(ctx->iface_recv, BUFSIZ, 1, 100, errbuf);
-    if (!pcap) {
-        fprintf(stderr, "RX: não foi possível abrir interface '%s': %s\n",
-                ctx->iface_recv, errbuf);
+    pcap_t *pc = pcap_open_live(ctx->iface_recv, BUFSIZ, 1, 100, errbuf);
+    if (!pc) {
+        fprintf(stderr, "RX: não abriu '%s': %s\n", ctx->iface_recv, errbuf);
         return NULL;
     }
 
@@ -81,44 +69,66 @@ static void *thread_rx(void *arg) {
     int done = 0;
     while (!done) {
         struct pcap_pkthdr *hdr;
-        const u_char *data;
-        int res = pcap_next_ex(pcap, &hdr, &data);
-        if (res == 1) {
-            // Salta ethernet + IP/TCP/UDP cabeçalhos até o payload
-            const u_char *payload = data + /* offset exato depende do seu add_ethernet_header + ip+tcp*/ 14 + 20 + 20;
-            // Encontre o separador '|'
-            char *sep = memchr((void*)payload, '|', hdr->caplen);
-            if (sep) {
-                int id = atoi((char*)payload);
-                if (id >= 1 && id <= (int)ctx->total_pkts) {
-                    pthread_mutex_lock(&ctx->lock);
-                    if (!ctx->recv_flags[id-1]) {
-                        ctx->recv_flags[id-1] = 1;
-                        // sinaliza caso tenha recebido o último pendente
-                        int all = 1;
-                        for (uint32_t i = 0; i < ctx->total_pkts; i++) {
-                            if (!ctx->recv_flags[i]) { all = 0; break; }
-                        }
-                        if (all) {
-                            done = 1;
-                            pthread_cond_signal(&ctx->cond_all_recv);
-                        }
-                    }
-                    pthread_mutex_unlock(&ctx->lock);
+        const u_char *pkt = NULL;
+        int res = pcap_next_ex(pc, &hdr, &pkt);
+        if (res == 1 && hdr->caplen >= 14 + 20) {
+            // 1) Cabeçalho Ethernet fixo (14 bytes)
+            // 2) Cabeçalho IPv4: IHL varia
+            uint8_t  ihl_words = pkt[14] & 0x0F;
+            size_t   ihl       = ihl_words * 4;
+            if (hdr->caplen < 14 + ihl) continue;
+
+            // 3) Protocolo de transporte
+            uint8_t proto = pkt[14 + 9];
+            size_t  th_len = 0;
+            if (proto == IPPROTO_TCP) {
+                // TCP Data Offset em palavras de 32 bits
+                uint8_t doff_words = (pkt[14 + ihl + 12] >> 4) & 0x0F;
+                th_len = doff_words * 4;
+            } else if (proto == IPPROTO_UDP || proto == IPPROTO_ICMP) {
+                th_len = 8;
+            } else {
+                continue;
+            }
+
+            // 4) Offset total do payload
+            size_t offset = 14 + ihl + th_len;
+            if (hdr->caplen <= offset) continue;
+            size_t payload_len = hdr->caplen - offset;
+            const u_char *payload = pkt + offset;
+
+            // 5) Procura ID no payload
+            char *sep = memchr((void*)payload, '|', payload_len);
+            if (!sep) continue;
+            int id = atoi((char*)payload);
+            if (id < 1 || id > (int)ctx->total_pkts) continue;
+
+            // 6) Marca como recebido
+            pthread_mutex_lock(&ctx->lock);
+            if (!ctx->recv_flags[id-1]) {
+                ctx->recv_flags[id-1] = 1;
+                // verifica se todos chegaram
+                int all = 1;
+                for (uint32_t i = 0; i < ctx->total_pkts; i++) {
+                    if (!ctx->recv_flags[i]) { all = 0; break; }
+                }
+                if (all) {
+                    done = 1;
+                    pthread_cond_signal(&ctx->cond_all_recv);
                 }
             }
+            pthread_mutex_unlock(&ctx->lock);
         }
-        // inicia contagem de timeout após o primeiro recv ou logo após TX
-        if (!start_wait) {
-            start_wait = now_ms();
-        }
-        if (start_wait && now_ms() - start_wait >= ctx->timeout_ms) {
+
+        // timeout global
+        if (!start_wait) start_wait = now_ms();
+        if (now_ms() - start_wait >= ctx->timeout_ms) {
             done = 1;
             pthread_cond_signal(&ctx->cond_all_recv);
         }
     }
 
-    pcap_close(pcap);
+    pcap_close(pc);
     return NULL;
 }
 
@@ -139,38 +149,40 @@ int txrx_run(packet_list_t *list,
     ctx.timeout_ms  = timeout_ms;
     ctx.total_pkts  = list->count;
     ctx.send_times_ms = calloc(ctx.total_pkts, sizeof(uint32_t));
-    ctx.recv_flags   = calloc(ctx.total_pkts, sizeof(int));
+    ctx.recv_flags    = calloc(ctx.total_pkts, sizeof(int));
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_cond_init(&ctx.cond_all_recv, NULL);
 
-    pthread_t th_tx, th_rx;
+    // inicia threads RX e TX
+    pthread_t th_rx, th_tx;
     pthread_create(&th_rx, NULL, thread_rx, &ctx);
-    usleep(100000);  // garante que RX comece antes de TX
+    usleep(100000);  // garante RX ativo antes de TX começar
     pthread_create(&th_tx, NULL, thread_tx, &ctx);
 
-    // espera RX terminar (todos recebidos ou timeout)
+    // aguarda sinal de conclusão (todos ou timeout)
     pthread_mutex_lock(&ctx.lock);
     pthread_cond_wait(&ctx.cond_all_recv, &ctx.lock);
     pthread_mutex_unlock(&ctx.lock);
 
-    // limpa threads
+    // finaliza threads
     pthread_join(th_tx, NULL);
     pthread_join(th_rx, NULL);
 
-    // computa estatísticas
+    // calcula estatísticas
     uint32_t recv_cnt = 0;
     for (uint32_t i = 0; i < ctx.total_pkts; i++) {
         if (ctx.recv_flags[i]) recv_cnt++;
     }
     uint32_t loss = ctx.total_pkts - recv_cnt;
     double loss_rate = (double)loss / ctx.total_pkts * 100.0;
-
-    printf("TX/RX concluído: enviados=%u, recebidos=%u, perdidos=%u, taxa de perda=%.2f%%\n",
+    printf("TX/RX concluído: enviados=%u, recebidos=%u, perdidos=%u, perda=%.2f%%\n",
            ctx.total_pkts, recv_cnt, loss, loss_rate);
 
+    // cleanup
     free(ctx.send_times_ms);
     free(ctx.recv_flags);
     pthread_mutex_destroy(&ctx.lock);
     pthread_cond_destroy(&ctx.cond_all_recv);
+
     return 0;
 }

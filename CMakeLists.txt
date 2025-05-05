@@ -24,7 +24,6 @@ set(GENERATOR_SOURCES
             src/generator/proto_udp.c
             src/generator/reader.c
             src/generator/generator.c
-        include/injector/packet_monitor.h
 )
 add_executable(generator ${GENERATOR_SOURCES})
 target_link_libraries(generator PRIVATE ${PCAP_LIBRARIES} ${JANSSON_LIBRARIES})
