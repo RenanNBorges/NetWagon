@@ -9,12 +9,8 @@
  *
  * @param filename     Caminho para o arquivo .json
  * @param list         Lista onde os pacotes serão inseridos
- * @param use_threads  1 para uso de threads, 0 para sequencial
- * @param num_threads  Número de threads a usar (se use_threads=1)
  */
 void load_templates_from_json(const char *filename,
-                              packet_list_t *list,
-                              int use_threads,
-                              int num_threads);
+                              packet_list_t *list);
 
 #endif // READER_H
