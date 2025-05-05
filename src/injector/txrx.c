@@ -2,7 +2,7 @@
 // Created by rnborges on 05/05/25.
 //
 
-#include "../../include/generator/txrx.h"
+#include "../../include/injector/txrx.h"
 #include <pcap.h>
 #include <pthread.h>
 #include <stdio.h>

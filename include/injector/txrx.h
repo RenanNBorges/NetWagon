@@ -2,7 +2,7 @@
 #define TXRX_H
 
 #include <stdint.h>
-#include "packet.h"
+#include "../generator/packet.h"
 
 #ifdef __cplusplus
 extern "C" {

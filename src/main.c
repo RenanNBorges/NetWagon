@@ -1,43 +1,54 @@
 // main.c
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <getopt.h>
+#include <pcap.h>
 
-#include "generator/packet.h"
-#include "generator/pcap_writer.h"
-#include "generator/reader.h"
-#include "generator/txrx.h"
+#include "../include/generator/reader.h"       // load_templates_from_json()
+#include "../include/generator/pcap_writer.h"  // open_pcap_file(), write_packet_list_to_pcap(), close_pcap_file()
+#include "../include/generator/packet.h"       // packet_list_t, free_packet_list()
+#include "../include/injector/txrx.h"
 
 static void print_usage(const char *prog) {
-    printf("Usage: %s <templates.json> <iface_in> <iface_out> [output.pcap] [timeout_ms]\n", prog);
-    printf("  <templates.json>   JSON template file\n");
-    printf("  <iface_in>         Interface de captura (RX)\n");
-    printf("  <iface_out>        Interface de envio (TX)\n");
-    printf("  [output.pcap]      Opcional: filename para gravar pcap\n");
-    printf("  [timeout_ms]       Opcional: timeout RX em ms (default=5000)\n");
-    printf("Options:\n");
-    printf("  -h, --help         Exibe esta ajuda e sai\n");
+    printf("Usage: %s -f <templates.json> -r <iface_in> -s <iface_out> [-o <output.pcap>] [-t <timeout_ms>]\n", prog);
+    printf("  -f <file>   JSON template file (obrigatório)\n");
+    printf("  -r <iface>  Interface de captura (RX) (obrigatório)\n");
+    printf("  -s <iface>  Interface de envio (TX) (obrigatório)\n");
+    printf("  -o <file>   Opcional: filename para gravar pcap\n");
+    printf("  -t <ms>     Opcional: timeout RX em milissegundos (default=5000)\n");
+    printf("  -h          Exibe esta ajuda e sai\n");
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 4) {
-        print_usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-        print_usage(argv[0]);
-        return EXIT_SUCCESS;
+    char *json_file = NULL;
+    char *iface_in = NULL;
+    char *iface_out = NULL;
+    char *output_pcap = NULL;
+    uint32_t timeout_ms = 5000;
+    int opt;
+
+    while ((opt = getopt(argc, argv, "f:r:s:o:t:h")) != -1) {
+        switch (opt) {
+            case 'f': json_file = optarg; break;
+            case 'r': iface_in = optarg; break;
+            case 's': iface_out = optarg; break;
+            case 'o': output_pcap = optarg; break;
+            case 't': timeout_ms = (uint32_t)atoi(optarg);
+                      if (timeout_ms == 0) timeout_ms = 5000;
+                      break;
+            case 'h':
+            default:
+                print_usage(argv[0]);
+                return (opt == 'h') ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
     }
 
-    const char *json_file     = argv[1];
-    const char *iface_in      = argv[2];
-    const char *iface_out     = argv[3];
-    const char *output_pcap   = (argc >= 5) ? argv[4] : NULL;
-    uint32_t timeout_ms       = 5000;
-    if (argc >= 6) {
-        timeout_ms = (uint32_t)atoi(argv[5]);
-        if (timeout_ms == 0) timeout_ms = 5000;
+    if (!json_file || !iface_in || !iface_out) {
+        fprintf(stderr, "Erro: parâmetros obrigatórios faltando.\n");
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
     }
 
     // 1) Cria lista e carrega templates
@@ -52,7 +63,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // 2) Se pediu pcap de saída, escreve os pacotes
+    // 2) PCAP opcional
     if (output_pcap) {
         pcap_dumper_t *dumper = open_pcap_file(output_pcap, 65535, DLT_EN10MB);
         if (!dumper) {
@@ -65,8 +76,8 @@ int main(int argc, char *argv[]) {
         close_pcap_file(dumper);
     }
 
-    // 3) Executa teste TX/RX com timeout e relatório de perda
-    printf("Iniciando teste TX/RX: send iface='%s', recv iface='%s', timeout=%ums\n",
+    // 3) Teste TX/RX
+    printf("Iniciando TX/RX: TX iface='%s', RX iface='%s', timeout=%ums\n",
            iface_out, iface_in, timeout_ms);
     int rc = txrx_run(list, iface_out, iface_in, timeout_ms);
     if (rc != 0) {
@@ -75,7 +86,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // 4) Finaliza
+    // 4) Cleanup
     free_packet_list(list);
     return EXIT_SUCCESS;
 }

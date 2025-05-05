@@ -39,7 +39,7 @@ set(INJECTOR_SOURCES
         src/generator/reader.c
         src/main.c
         src/injector/txrx.c
-        include/generator/txrx.h
+        include/injector/txrx.h
 )
 add_executable(netwagon ${INJECTOR_SOURCES})
 target_link_libraries(netwagon PRIVATE ${PCAP_LIBRARIES} ${JANSSON_LIBRARIES})
