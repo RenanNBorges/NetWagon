@@ -25,16 +25,12 @@ set(GENERATOR_SOURCES
             src/generator/reader.c
             src/generator/generator.c
         include/injector/packet_monitor.h
-        src/generator/payload.c
-        include/generator/payload.h
 )
 add_executable(generator ${GENERATOR_SOURCES})
 target_link_libraries(generator PRIVATE ${PCAP_LIBRARIES} ${JANSSON_LIBRARIES})
 
 # Injector target
 set(INJECTOR_SOURCES
-        src/generator/payload.c
-        include/generator/payload.h
         src/generator/packet.c
         src/generator/pcap_writer.c
         src/generator/proto_icmp.c
