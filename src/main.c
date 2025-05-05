@@ -1,100 +1,81 @@
-/* main.c */
+// main.c
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pcap.h>
-#include "latency_module.h"    // nosso módulo de medição de RTT
-#include "../include/generator/reader.h"
-#include "../include/generator/pcap_writer.h"
-#include "../include/generator/packet.h"
+
+#include "generator/packet.h"
+#include "generator/pcap_writer.h"
+#include "generator/reader.h"
+#include "generator/txrx.h"
 
 static void print_usage(const char *prog) {
-    printf("Usage: %s <templates.json> <eth_in> <eth_out>\n", prog);
+    printf("Usage: %s <templates.json> <iface_in> <iface_out> [output.pcap] [timeout_ms]\n", prog);
     printf("  <templates.json>   JSON template file\n");
-    printf("  <eth_in>           Interface Input (\"none\" para desabilitar captura)\n");
-    printf("  <eth_out>          Interface Output\n");
-    printf("  [output.pcap]      Optional output pcap filename (default: output.pcap)\n");
+    printf("  <iface_in>         Interface de captura (RX)\n");
+    printf("  <iface_out>        Interface de envio (TX)\n");
+    printf("  [output.pcap]      Opcional: filename para gravar pcap\n");
+    printf("  [timeout_ms]       Opcional: timeout RX em ms (default=5000)\n");
     printf("Options:\n");
-    printf("  -h, --help         Display this help and exit\n");
+    printf("  -h, --help         Exibe esta ajuda e sai\n");
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 4 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+    if (argc < 4) {
         print_usage(argv[0]);
-        return (argc < 4) ? 1 : 0;
+        return EXIT_FAILURE;
+    }
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+        print_usage(argv[0]);
+        return EXIT_SUCCESS;
     }
 
     const char *json_file     = argv[1];
-    const char *interface_in  = argv[2];
-    const char *interface_out = argv[3];
-    const char *output_pcap   = (argc >= 5) ? argv[4] : "output.pcap";
+    const char *iface_in      = argv[2];
+    const char *iface_out     = argv[3];
+    const char *output_pcap   = (argc >= 5) ? argv[4] : NULL;
+    uint32_t timeout_ms       = 5000;
+    if (argc >= 6) {
+        timeout_ms = (uint32_t)atoi(argv[5]);
+        if (timeout_ms == 0) timeout_ms = 5000;
+    }
 
-    // 1) Carrega templates e gera lista de pacotes
+    // 1) Cria lista e carrega templates
     packet_list_t *list = create_packet_list();
     if (!list) {
-        fprintf(stderr, "Falha ao criar lista de pacotes\n");
-        return 1;
+        fprintf(stderr, "Erro: não foi possível criar packet list\n");
+        return EXIT_FAILURE;
     }
-    load_templates_from_json(json_file, list);
-
-    // 2) (Opcional) grava em PCAP de saída
-    pcap_dumper_t *dumper = open_pcap_file(output_pcap, 65535, DLT_EN10MB);
-    if (!dumper) {
-        fprintf(stderr, "Erro criando pcap '%s'\n", output_pcap);
+    if (load_templates_from_json(json_file, list) != 0) {
+        fprintf(stderr, "Erro ao carregar JSON '%s'\n", json_file);
         free_packet_list(list);
-        return 1;
-    }
-    int written = write_packet_list_to_pcap(dumper, list);
-    printf("Wrote %d packets to '%s'\n", written, output_pcap);
-    close_pcap_file(dumper);
-
-    // 3) Abre handles libpcap para envio e captura
-    char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *handle_out = pcap_open_live(interface_out, BUFSIZ, 1, 1000, errbuf);
-    if (!handle_out) {
-        fprintf(stderr, "Erro abrindo output '%s': %s\n", interface_out, errbuf);
-        free_packet_list(list);
-        return 1;
+        return EXIT_FAILURE;
     }
 
-    pcap_t *handle_in = NULL;
-    if (strcmp(interface_in, "none") != 0) {
-        handle_in = pcap_open_live(interface_in, BUFSIZ, 1, 1000, errbuf);
-        if (!handle_in) {
-            fprintf(stderr, "Aviso: não foi possível abrir input '%s': %s\n",
-                    interface_in, errbuf);
-            // prossegue mesmo sem captura
+    // 2) Se pediu pcap de saída, escreve os pacotes
+    if (output_pcap) {
+        pcap_dumper_t *dumper = open_pcap_file(output_pcap, 65535, DLT_EN10MB);
+        if (!dumper) {
+            fprintf(stderr, "Erro criando pcap '%s'\n", output_pcap);
+            free_packet_list(list);
+            return EXIT_FAILURE;
         }
+        int n = write_packet_list_to_pcap(dumper, list);
+        printf("Gravou %d pacotes em '%s'\n", n, output_pcap);
+        close_pcap_file(dumper);
     }
 
-    // 4) Inicializa módulo de latência (aloca tabela, guarda handles)
-    if (latency_module_init(handle_out, handle_in, list->count) != 0) {
-        fprintf(stderr, "Erro inicializando módulo de latência\n");
-        pcap_close(handle_out);
-        if (handle_in) pcap_close(handle_in);
+    // 3) Executa teste TX/RX com timeout e relatório de perda
+    printf("Iniciando teste TX/RX: send iface='%s', recv iface='%s', timeout=%ums\n",
+           iface_out, iface_in, timeout_ms);
+    int rc = txrx_run(list, iface_out, iface_in, timeout_ms);
+    if (rc != 0) {
+        fprintf(stderr, "Erro durante TX/RX (rc=%d)\n", rc);
         free_packet_list(list);
-        return 1;
+        return EXIT_FAILURE;
     }
 
-    // 5) Inicia threads de envio/recepção
-    if (latency_module_start() != 0) {
-        fprintf(stderr, "Erro iniciando threads de latência\n");
-        latency_module_cleanup();
-        free_packet_list(list);
-        return 1;
-    }
-
-    // 6) Aqui você pode fazer outras tarefas ou simplesmente aguardar término.
-    //    Se quiser rodar até Ctrl+C, pode usar pause() ou similar.
-    printf("Medição de latência em andamento (%u pacotes)...\n", list->count);
-    latency_module_join();   // bloqueia até todas threads terminarem
-
-    // 7) Finaliza e libera recursos
-    latency_module_cleanup();
-    pcap_close(handle_out);
-    if (handle_in) pcap_close(handle_in);
+    // 4) Finaliza
     free_packet_list(list);
-
-    printf("Recebidos %lu pacotes de %u enviados\n", received_count, list->count);
-    return 0;
+    return EXIT_SUCCESS;
 }

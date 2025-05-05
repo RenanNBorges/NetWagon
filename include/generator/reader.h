@@ -10,7 +10,7 @@
  * @param filename     Caminho para o arquivo .json
  * @param list         Lista onde os pacotes serão inseridos
  */
-void load_templates_from_json(const char *filename,
+int load_templates_from_json(const char *filename,
                               packet_list_t *list);
 
 #endif // READER_H

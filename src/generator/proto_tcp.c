@@ -1,6 +1,4 @@
-//
-// Created by rnborges on 28/04/25.
-//
+//proto_tcp.c
 
 #include "../../include/generator/proto_tcp.h"
 #include <string.h>
