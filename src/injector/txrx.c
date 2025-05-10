@@ -8,20 +8,6 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-typedef struct {
-    packet_list_t *list;
-    const char    *iface_send;
-    const char    *iface_recv;
-    uint32_t       timeout_ms;
-
-    uint32_t      total_pkts;
-    uint32_t     *send_times_ms;
-    int          *recv_flags;
-
-    pthread_mutex_t lock;
-    pthread_cond_t  cond_all_recv;
-} txrx_ctx_t;
-
 // obtém timestamp em ms
 static uint32_t now_ms() {
     struct timeval tv;
