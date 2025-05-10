@@ -1,4 +1,4 @@
-
+// txrx.c
 #include "../include/injector/txrx.h"
 #include <pcap.h>
 #include <pthread.h>
@@ -8,11 +8,10 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-// obtém timestamp em ms
-static uint32_t now_ms() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+static uint64_t now_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)(ts.tv_sec * 1000000000 + ts.tv_nsec);
 }
 
 // thread de envio
@@ -27,12 +26,12 @@ static void *thread_tx(void *arg) {
 
     packet_t *pkt = ctx->list->head;
     for (uint32_t idx = 0; pkt; pkt = pkt->next, idx++) {
-        uint32_t t0 = now_ms();
+        const uint64_t t0 = now_ns();
         if (pcap_sendpacket(pc, pkt->data, pkt->length) != 0) {
             fprintf(stderr, "TX[%u]: falha: %s\n", idx, pcap_geterr(pc));
         }
         pthread_mutex_lock(&ctx->lock);
-        ctx->send_times_ms[idx] = t0;
+        ctx->send_timestamp[idx] = t0;
         pthread_mutex_unlock(&ctx->lock);
         usleep(1000);  // pequenas pausas para não atropelar a interface
     }
@@ -51,9 +50,10 @@ static void *thread_rx(void *arg) {
         return NULL;
     }
 
-    uint32_t start_wait = 0;
+    uint64_t start_wait = 0;
     int done = 0;
     while (!done) {
+        const uint64_t t1 = now_ns();
         struct pcap_pkthdr *hdr;
         const u_char *pkt = NULL;
         int res = pcap_next_ex(pc, &hdr, &pkt);
@@ -91,12 +91,12 @@ static void *thread_rx(void *arg) {
 
             // 6) Marca como recebido
             pthread_mutex_lock(&ctx->lock);
-            if (!ctx->recv_flags[id-1]) {
-                ctx->recv_flags[id-1] = 1;
+            if (!ctx->recv_timestamp[id-1]){
+                ctx->recv_timestamp[id-1] = t1;
                 // verifica se todos chegaram
                 int all = 1;
                 for (uint32_t i = 0; i < ctx->total_pkts; i++) {
-                    if (!ctx->recv_flags[i]) { all = 0; break; }
+                    if (!ctx->recv_timestamp[i]) { all = 0; break; }
                 }
                 if (all) {
                     done = 1;
@@ -107,8 +107,8 @@ static void *thread_rx(void *arg) {
         }
 
         // timeout global
-        if (!start_wait) start_wait = now_ms();
-        if (now_ms() - start_wait >= ctx->timeout_ms) {
+        if (!start_wait) start_wait = now_ns();
+        if (now_ns() - start_wait >= (uint64_t)ctx->timeout_ms * 1000000) {
             done = 1;
             pthread_cond_signal(&ctx->cond_all_recv);
         }
@@ -134,8 +134,8 @@ int txrx_run(packet_list_t *list,
     ctx.iface_recv  = iface_recv;
     ctx.timeout_ms  = timeout_ms;
     ctx.total_pkts  = list->count;
-    ctx.send_times_ms = calloc(ctx.total_pkts, sizeof(uint32_t));
-    ctx.recv_flags    = calloc(ctx.total_pkts, sizeof(int));
+    ctx.send_timestamp = calloc(ctx.total_pkts, sizeof(uint64_t));
+    ctx.recv_timestamp    = calloc(ctx.total_pkts, sizeof(uint64_t));
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_cond_init(&ctx.cond_all_recv, NULL);
 
@@ -157,7 +157,7 @@ int txrx_run(packet_list_t *list,
     // calcula estatísticas
     uint32_t recv_cnt = 0;
     for (uint32_t i = 0; i < ctx.total_pkts; i++) {
-        if (ctx.recv_flags[i]) recv_cnt++;
+        if (ctx.recv_timestamp[i]) recv_cnt++;
     }
     uint32_t loss = ctx.total_pkts - recv_cnt;
     double loss_rate = (double)loss / ctx.total_pkts * 100.0;
@@ -165,8 +165,8 @@ int txrx_run(packet_list_t *list,
            ctx.total_pkts, recv_cnt, loss, loss_rate);
 
     // cleanup
-    free(ctx.send_times_ms);
-    free(ctx.recv_flags);
+    free(ctx.send_timestamp);
+    free(ctx.recv_timestamp);
     pthread_mutex_destroy(&ctx.lock);
     pthread_cond_destroy(&ctx.cond_all_recv);
 

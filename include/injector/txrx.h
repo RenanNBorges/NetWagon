@@ -6,14 +6,14 @@
 
 
 typedef struct {
-    packet_list_t *list;
-    const char    *iface_send;
-    const char    *iface_recv;
-    uint32_t       timeout_ms;
+    packet_list_t   *list;
+    const char      *iface_send;
+    const char      *iface_recv;
+    uint32_t        timeout_ms;
 
-    uint32_t      total_pkts;
-    uint32_t     *send_times_ms;
-    int          *recv_flags;
+    uint32_t        total_pkts;
+    uint64_t        *send_timestamp;
+    uint64_t        *recv_timestamp;
 
     pthread_mutex_t lock;
     pthread_cond_t  cond_all_recv;
