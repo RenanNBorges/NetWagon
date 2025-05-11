@@ -1,5 +1,6 @@
 // txrx.c
 #include "../include/injector/txrx.h"
+#include "../include/injector/save_metrics.h"
 #include <pcap.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -136,6 +137,12 @@ int txrx_run(packet_list_t *list,
     ctx.total_pkts  = list->count;
     ctx.send_timestamp = calloc(ctx.total_pkts, sizeof(uint64_t));
     ctx.recv_timestamp    = calloc(ctx.total_pkts, sizeof(uint64_t));
+    time_t now;
+    struct tm *timeinfo;
+
+    time(&now);
+    timeinfo = localtime(&now);
+
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_cond_init(&ctx.cond_all_recv, NULL);
 
@@ -163,6 +170,10 @@ int txrx_run(packet_list_t *list,
     double loss_rate = (double)loss / ctx.total_pkts * 100.0;
     printf("TX/RX concluído: enviados=%u, recebidos=%u, perdidos=%u, perda=%.2f%%\n",
            ctx.total_pkts, recv_cnt, loss, loss_rate);
+
+    if (save_metrics_to_csv(ctx.send_timestamp, ctx.recv_timestamp, ctx.total_pkts, timeinfo) != 0) {
+        fprintf(stderr, "Falha ao salvar métricas de latência\n");
+    }
 
     // cleanup
     free(ctx.send_timestamp);
