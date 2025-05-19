@@ -31,9 +31,9 @@ static void *thread_tx(void *arg) {
         if (pcap_sendpacket(pc, pkt->data, pkt->length) != 0) {
             fprintf(stderr, "TX[%u]: falha: %s\n", idx, pcap_geterr(pc));
         }
-        pthread_mutex_lock(&ctx->lock);
+        //pthread_mutex_lock(&ctx->lock);
         ctx->send_timestamp[idx] = t0;
-        pthread_mutex_unlock(&ctx->lock);
+        //pthread_mutex_unlock(&ctx->lock);
         usleep(1000);  // pequenas pausas para não atropelar a interface
     }
 
@@ -54,13 +54,14 @@ static void *thread_rx(void *arg) {
     uint64_t start_wait = 0;
     int done = 0;
     while (!done) {
-        const uint64_t t1 = now_ns();
+
         struct pcap_pkthdr *hdr;
         const u_char *pkt = NULL;
         int res = pcap_next_ex(pc, &hdr, &pkt);
         if (res == 1 && hdr->caplen >= 14 + 20) {
             // 1) Cabeçalho Ethernet fixo (14 bytes)
             // 2) Cabeçalho IPv4: IHL varia
+            const uint64_t t1 = now_ns();
             uint8_t  ihl_words = pkt[14] & 0x0F;
             size_t   ihl       = ihl_words * 4;
             if (hdr->caplen < 14 + ihl) continue;
@@ -91,7 +92,7 @@ static void *thread_rx(void *arg) {
             if (id < 1 || id > (int)ctx->total_pkts) continue;
 
             // 6) Marca como recebido
-            pthread_mutex_lock(&ctx->lock);
+            //pthread_mutex_lock(&ctx->lock);
             if (!ctx->recv_timestamp[id-1]){
                 ctx->recv_timestamp[id-1] = t1;
                 // verifica se todos chegaram
@@ -104,7 +105,7 @@ static void *thread_rx(void *arg) {
                     pthread_cond_signal(&ctx->cond_all_recv);
                 }
             }
-            pthread_mutex_unlock(&ctx->lock);
+            //pthread_mutex_unlock(&ctx->lock);
         }
 
         // timeout global
@@ -143,7 +144,7 @@ int txrx_run(packet_list_t *list,
     time(&now);
     timeinfo = localtime(&now);
 
-    pthread_mutex_init(&ctx.lock, NULL);
+    //pthread_mutex_init(&ctx.lock, NULL);
     pthread_cond_init(&ctx.cond_all_recv, NULL);
 
     // inicia threads RX e TX
@@ -153,9 +154,9 @@ int txrx_run(packet_list_t *list,
     pthread_create(&th_tx, NULL, thread_tx, &ctx);
 
     // aguarda sinal de conclusão (todos ou timeout)
-    pthread_mutex_lock(&ctx.lock);
+    //pthread_mutex_lock(&ctx.lock);
     pthread_cond_wait(&ctx.cond_all_recv, &ctx.lock);
-    pthread_mutex_unlock(&ctx.lock);
+    //pthread_mutex_unlock(&ctx.lock);
 
     // finaliza threads
     pthread_join(th_tx, NULL);
@@ -178,7 +179,7 @@ int txrx_run(packet_list_t *list,
     // cleanup
     free(ctx.send_timestamp);
     free(ctx.recv_timestamp);
-    pthread_mutex_destroy(&ctx.lock);
+    //pthread_mutex_destroy(&ctx.lock);
     pthread_cond_destroy(&ctx.cond_all_recv);
 
     return 0;
